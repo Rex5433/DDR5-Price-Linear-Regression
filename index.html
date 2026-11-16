@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111318">
+  <title>DDR5 RAM Price Predictor</title>
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    /* Only page-specific layout. Colors, font, panels and controls come from Sentinel's style.css. */
+    .ram-main { max-width: 760px; padding-bottom: 2rem; }
+    .ram-main .page-heading { margin: 2rem 0 1.25rem; }
+    .ram-main .page-heading p { color: var(--quiet); }
+    .ram-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 1rem; }
+    .ram-grid label { margin-top: .75rem; }
+    .ram-actions { margin-top: 1.2rem; }
+    .ram-actions button { width: 100%; }
+    .ram-result { margin-top: 1rem; padding: 1.1rem 1.4rem; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--cyan); border-radius: 4px; }
+    .ram-result strong { display: block; font-size: 2rem; font-weight: 650; color: var(--cyan); line-height: 1.2; margin-top: .2rem; }
+    .ram-status { font-size: .8rem; color: var(--quiet); margin: .8rem 0 0; }
+    .ram-status.error { color: var(--critical-ink); }
+    @media (max-width: 520px) { .ram-grid { grid-template-columns: 1fr; } .ram-main .page-heading { margin-top: 1.25rem; } }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">R</span><span>RAM Predictor <small>PYTORCH / ONNX</small></span></div>
+  </header>
+  <main class="ram-main">
+    <div class="page-heading">
+      <div>
+        <p class="eyebrow">REGRESSION / DDR5 MEMORY</p>
+        <h1>RAM price prediction</h1>
+        <p>Enter DDR5 RAM specifications to estimate a retail price using a Regression model.</p>
+      </div>
+    </div>
+    <section class="panel" aria-labelledby="ram-title">
+      <h2 id="ram-title">Memory specifications</h2>
+      <form id="ram-form">
+        <div class="ram-grid">
+          <label for="capacity">Capacity (GB)
+            <input id="capacity" type="number" min="1" step="any" value="32" required>
+          </label>
+          <label for="speed">Speed (MT/s)
+            <input id="speed" type="number" min="1" step="any" value="6000" required>
+          </label>
+          <label for="latency">CAS latency (CL)
+            <input id="latency" type="number" min="1" step="any" value="30" required>
+          </label>
+          <label for="sticks">Number of sticks
+            <input id="sticks" type="number" min="1" step="1" value="2" required>
+          </label>
+          <label for="date">Historical observation date (July 13 – August 10, 2026)
+            <input id="date" type="date" min="2026-07-13" max="2026-08-10" value="2026-08-10" required>
+          </label>
+        </div>
+        <div class="ram-actions"><button id="predict" type="submit" disabled>Loading model...</button></div>
+      </form>
+      <p class="ram-status" id="status" role="status" aria-live="polite">Loading ONNX model...</p>
+    </section>
+    <section id="result" class="ram-result" aria-live="polite" hidden>
+      <span class="eyebrow">ESTIMATED RETAIL PRICE</span>
+      <strong id="price">—</strong>
+    </section>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+  <script>
+    let session;
+    const form = document.getElementById('ram-form');
+    const status = document.getElementById('status');
+    const button = document.getElementById('predict');
+    const output = document.getElementById('price');
+    const result = document.getElementById('result');
+
+    //Loads the locally hosted ONNX model.
+    async function loadModel() {
+      try {
+        if (!window.ort) throw new Error('ONNX Runtime Web is unavailable.');
+        session = await ort.InferenceSession.create('./ram_price_model.onnx', { executionProviders: ['wasm'] });
+        button.disabled = false;
+        button.textContent = 'Predict price';
+        status.textContent = 'Model ready';
+      } catch (error) {
+        status.textContent = 'Model failed to load: ' + error.message;
+        status.classList.add('error');
+        button.textContent = 'Model unavailable';
+      }
+    }
+
+    //Predicts a price using the same five features as the regression notebook.
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!session || !form.reportValidity()) return;
+      const date = document.getElementById('date').value;
+      const day = Math.round((Date.parse(date + 'T00:00:00Z') - Date.UTC(2026, 6, 13)) / 86400000);
+      const values = [
+        Number(document.getElementById('capacity').value),
+        Number(document.getElementById('speed').value),
+        Number(document.getElementById('latency').value),
+        Number(document.getElementById('sticks').value),
+        day
+      ];
+      if (values.some(n => !Number.isFinite(n)) || values.slice(0, 4).some(n => n <= 0) || day < 0 || day > 28) {
+        status.textContent = 'Enter valid values and a date between July 13 and August 10, 2026.';
+        status.classList.add('error');
+        return;
+      }
+      button.disabled = true;
+      button.textContent = 'Predicting...';
+      status.classList.remove('error');
+      result.hidden = true;
+      try {
+        const input = new ort.Tensor('float32', Float32Array.from(values), [1, 5]);
+        const prediction = await session.run({ input });
+        const dollars = Number(prediction.price.data[0]);
+        if (!Number.isFinite(dollars)) throw new Error('Invalid model output.');
+        output.textContent = dollars.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+        result.hidden = false;
+        status.textContent = 'Prediction complete';
+      } catch (error) {
+        status.textContent = 'Prediction failed: ' + error.message;
+        status.classList.add('error');
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Predict price';
+      }
+    });
+    loadModel();
+  </script>
+</body>
+</html>
