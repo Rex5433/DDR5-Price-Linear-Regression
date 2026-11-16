@@ -7,7 +7,6 @@
   <title>DDR5 RAM Price Predictor</title>
   <link rel="stylesheet" href="./style.css">
   <style>
-    /* Only page-specific layout. Colors, font, panels and controls come from Sentinel's style.css. */
     .ram-main { max-width: 760px; padding-bottom: 2rem; }
     .ram-main .page-heading { margin: 2rem 0 1.25rem; }
     .ram-main .page-heading p { color: var(--quiet); }
@@ -72,7 +71,6 @@
     const output = document.getElementById('price');
     const result = document.getElementById('result');
 
-    //Loads the locally hosted ONNX model.
     async function loadModel() {
       try {
         if (!window.ort) throw new Error('ONNX Runtime Web is unavailable.');
@@ -87,7 +85,6 @@
       }
     }
 
-    //Predicts a price using the same five features as the regression notebook.
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       if (!session || !form.reportValidity()) return;
